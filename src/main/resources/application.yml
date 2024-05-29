@@ -1,0 +1,12 @@
+spring:
+    config:
+        activate:
+            on-profile: int
+    datasource:
+        url: jdbc:mysql://dbti-sql.demando.de:3306/test_quizme
+        username: peterj
+        password: 1brO5Rc4DaOcvHfD
+        driverClassName: com.mysql.cj.jdbc.Driver
+    sql:
+        init:
+            platform: mysql

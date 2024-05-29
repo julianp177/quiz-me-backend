@@ -1,0 +1,60 @@
+variables:
+  TAG_COMMON: dockersrv-portal-dev-01.demando.de/docker/portal/sap-quiz-me24
+  DEPLOY: "false"
+  PORTAL_BACKEND: "quiz-me"
+  BUILD_ENV: "int"
+  
+stages:
+  - build
+  - create-docker-image
+  - deploy
+
+build:
+  stage: build
+  image: maven:3.9.6-eclipse-temurin-21-jammy
+  script:
+   - mvn clean install -s ci_settings.xml
+  after_script:
+    - export JAR_FILE=$(find . -type f -name "*.jar")
+    - mvn -s ../ci_settings.xml deploy:deploy-file -DpomFile=pom.xml -Dfile=${JAR_FILE} -DrepositoryId=gitlab-maven -Durl=${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/maven
+  artifacts:
+    when: on_success
+    paths:
+      - target/quiz-me-backend-0.0.1-SNAPSHOT.jar
+
+create-image-quiz-me:
+  stage: create-docker-image
+  image: docker:25.0.5-git
+  
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    TAG_LATEST: ${TAG_COMMON}:latest
+    TAG_COMMIT: ${TAG_COMMON}:$CI_COMMIT_SHORT_SHA
+    
+  services:
+    - name: docker:dind
+  before_script:
+    - mkdir -p ~/.docker
+    - echo "${DOCKER_AUTH_CONFIG}" > ~/.docker/config.json
+    - docker pull ${TAG_LATEST} || true
+  script:
+    - docker buildx build -t ${TAG_LATEST} -t ${TAG_COMMIT} -f Dockerfile .
+  after_script:
+    - docker push ${TAG_COMMIT}
+    - docker push ${TAG_LATEST}
+
+deploy:
+  image: alpine:latest
+  stage: deploy
+  variables:
+    TAG_COMMIT: ${TAG_COMMON}/${PORTAL_BACKEND}:$CI_COMMIT_SHORT_SHA
+    CONTAINER_NAME: ${PORTAL_BACKEND}-backend-${BUILD_ENV}
+    only:
+    variables:
+      - ($DEPLOY == "true")
+  script:
+    - chmod og= $ID_RSA_DEPLOYER
+    - apk update && apk add openssh-client
+    - ssh -i $ID_RSA_DEPLOYER -o StrictHostKeyChecking=no $HOST_USER@$HOST_IP "docker pull $TAG_COMMIT"
+    - ssh -i $ID_RSA_DEPLOYER -o StrictHostKeyChecking=no $HOST_USER@$HOST_IP "docker container rm -f $CONTAINER_NAME || true"
+    - ssh -i $ID_RSA_DEPLOYER -o StrictHostKeyChecking=no $HOST_USER@$HOST_IP "docker run -d --restart unless-stopped --name $CONTAINER_NAME $TAG_COMMIT --spring.profiles.active=$BUILD_ENV"
